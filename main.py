@@ -1,6 +1,5 @@
 """Analytical responses of series RC, RL and RLC circuits for t >= 0."""
 from abc import ABC, abstractmethod
-import math
 import numpy as np
 
 
@@ -40,6 +39,8 @@ class SinusoidalSource(VoltageSource):
         self.amplitude = amplitude
         self.frequency = frequency
         self.phase_degrees = phase_degrees
+        # sin(angle) = the real part of -j * exp(j * angle).
+        # Python writes the imaginary unit as 1j.
         coefficient = amplitude * np.exp(1j * np.deg2rad(phase_degrees)) / 1j
         super().__init__(coefficient, 2j * np.pi * frequency)
 
@@ -61,30 +62,59 @@ class Response:
         self.unit = unit
 
     def value(self, t, derivative=0):
-        if not isinstance(derivative, int) or derivative < 0:
-            raise ValueError('Derivative order must be a nonnegative integer.')
+        # Only the first two derivatives are needed by the circuit equations.
+        if derivative not in (0, 1, 2):
+            raise ValueError('Derivative order must be 0, 1, or 2.')
+
         times = np.asarray(t, dtype=float)
         if not np.all(np.isfinite(times)) or np.any(times < 0):
             raise ValueError('Evaluation times must be finite and nonnegative.')
+
         total = np.zeros_like(times, dtype=complex)
         with np.errstate(over='raise', invalid='raise', divide='raise'):
-            for coefficient, power, exponent in self.terms:
-                for j in range(min(power, derivative) + 1):
-                    total += (coefficient * math.comb(derivative, j)
-                              * math.factorial(power) / math.factorial(power - j)
-                              * times ** (power - j) * exponent ** (derivative - j)
-                              * np.exp(exponent * times))
-        return total.real.item() if total.ndim == 0 else total.real
+            for coefficient, power, rate in self.terms:
+                # The polynomial can only be 1, t, or t squared.
+                if power == 0:
+                    polynomial = np.ones_like(times)
+                    first_derivative = 0
+                    second_derivative = 0
+                elif power == 1:
+                    polynomial = times
+                    first_derivative = 1
+                    second_derivative = 0
+                else:
+                    polynomial = times ** 2
+                    first_derivative = 2 * times
+                    second_derivative = 2
+
+                # Product rule for polynomial * exp(rate * t).
+                if derivative == 1:
+                    polynomial = first_derivative + rate * polynomial
+                elif derivative == 2:
+                    polynomial = (second_derivative + 2 * rate * first_derivative
+                                  + rate ** 2 * polynomial)
+
+                total += coefficient * polynomial * np.exp(rate * times)
+
+        # Complex numbers are used to represent sine waves. The physical
+        # voltage/current is always the real part of the answer.
+        if total.ndim == 0:
+            return total.real.item()
+        return total.real
 
     def equation(self):
-        def number(z):
-            z = complex(z)
-            return f'{z.real:.12g}' if z.imag == 0 else f'{z:.12g}'
         parts = []
-        for coefficient, power, exponent in self.terms:
-            polynomial = '' if power == 0 else ('*t' if power == 1 else f'*t^{power}')
-            parts.append(f'({number(coefficient)}){polynomial}*exp(({number(exponent)})*t)')
-        return f'{self.label}(t) = Re[ ' + ' + '.join(parts) + f' ] {self.unit}'
+        for coefficient, power, rate in self.terms:
+            term = f'({coefficient:.6g})'
+            if power == 1:
+                term += '*t'
+            elif power == 2:
+                term += '*t^2'
+            term += f'*exp(({rate:.6g})*t)'
+            parts.append(term)
+
+        expression = ' + '.join(parts)
+        return f'{self.label}(t) = Re[ {expression} ] {self.unit}'
 
 
 
@@ -101,41 +131,62 @@ class Circuit(ABC):
         print(response.equation())
         return response
 
-    @staticmethod
-    def _particular(source, a2, a1, a0, gain, label, unit):
-        """Solve P(D)y = gain*source, including simple and repeated root matching."""
-        s = source.exponent
-        p = a2 * s * s + a1 * s + a0
-        scale = max(abs(a2 * s * s), abs(a1 * s), abs(a0))
-        if abs(p) > 1e-12 * scale:
-            term = (gain * source.coefficient / p, 0, s)
+    def forced_response(self, second_order, first_order, constant, label, unit):
+        """Find the source-driven part of the response.
+
+        The circuit equation is:
+        second_order*y'' + first_order*y' + constant*y = source voltage.
+        Try y = coefficient * exp(rate*t), then substitute into that equation.
+        """
+        rate = self.Vs.exponent
+        amplitude = self.Vs.coefficient
+        denominator = second_order * rate ** 2 + first_order * rate + constant
+        scale = max(abs(second_order * rate ** 2), abs(first_order * rate), abs(constant))
+
+        if abs(denominator) > 1e-12 * scale:
+            coefficient = amplitude / denominator
+            power = 0
         else:
-            dp = 2 * a2 * s + a1
-            if abs(dp) > 1e-12 * max(abs(2 * a2 * s), abs(a1)):
-                term = (gain * source.coefficient / dp, 1, s)
+            # Matching a natural root requires an extra factor of t.
+            slope = 2 * second_order * rate + first_order
+            slope_scale = max(abs(2 * second_order * rate), abs(first_order))
+            if abs(slope) > 1e-12 * slope_scale:
+                coefficient = amplitude / slope
+                power = 1
             else:
-                term = (gain * source.coefficient / (2 * a2), 2, s)
-        return Response([term], label, unit)
+                # A repeated natural root requires t squared instead.
+                coefficient = amplitude / (2 * second_order)
+                power = 2
+
+        return Response([(coefficient, power, rate)], label, unit)
 
     @staticmethod
     def positive(*values):
-        if any(not np.isfinite(v) or v <= 0 for v in values):
-            raise ValueError('Component values must be finite and positive.')
+        for value in values:
+            if not np.isfinite(value) or value <= 0:
+                raise ValueError('Component values must be finite and positive.')
 
     @staticmethod
     def source(value):
-        return value if isinstance(value, VoltageSource) else DCSource(value)
+        if isinstance(value, VoltageSource):
+            return value
+        return DCSource(value)
 
 
 class RCCircuit(Circuit):
     def __init__(self, R, C, Vs, V0):
         self.positive(R, C)
-        self.R, self.C, self.Vs, self.V0 = R, C, self.source(Vs), V0
+        self.R = R
+        self.C = C
+        self.Vs = self.source(Vs)
+        self.V0 = V0
 
     def response(self):
         tau = self.R * self.C
-        result = self._particular(self.Vs, 0, tau, 1, 1, 'Vc', 'V')
-        result.terms.append((self.V0 - result.value(0), 0, -1 / tau))
+        result = self.forced_response(0, tau, 1, 'Vc', 'V')
+        # Add a decaying term so the capacitor starts at V0.
+        initial_difference = self.V0 - result.value(0)
+        result.terms.append((initial_difference, 0, -1 / tau))
         return result
 
     def calculate_response(self):
@@ -147,11 +198,16 @@ class RLCircuit(Circuit):
     """Series RL circuit (name retained for compatibility)."""
     def __init__(self, R, L, Vs, I0):
         self.positive(R, L)
-        self.R, self.L, self.Vs, self.I0 = R, L, self.source(Vs), I0
+        self.R = R
+        self.L = L
+        self.Vs = self.source(Vs)
+        self.I0 = I0
 
     def response(self):
-        result = self._particular(self.Vs, 0, self.L, self.R, 1, 'iL', 'A')
-        result.terms.append((self.I0 - result.value(0), 0, -self.R / self.L))
+        result = self.forced_response(0, self.L, self.R, 'iL', 'A')
+        # Add a decaying term so the inductor current starts at I0.
+        initial_difference = self.I0 - result.value(0)
+        result.terms.append((initial_difference, 0, -self.R / self.L))
         return result
 
     def calculate_response(self):
@@ -162,29 +218,38 @@ class RLCircuit(Circuit):
 class SeriesRLC(Circuit):
     def __init__(self, R, L, C, Vs, V0, I0):
         self.positive(R, L, C)
-        self.R, self.L, self.C = R, L, C
-        self.Vs, self.V0, self.I0 = self.source(Vs), V0, I0
+        self.R = R
+        self.L = L
+        self.C = C
+        self.Vs = self.source(Vs)
+        self.V0 = V0
+        self.I0 = I0
 
     def damping(self):
         alpha = self.R / (2 * self.L)
         omega0 = 1 / np.sqrt(self.L * self.C)
         if np.isclose(alpha, omega0, rtol=1e-12, atol=0):
             return 'Critically Damped', alpha, omega0
-        return ('Overdamped' if alpha > omega0 else 'Underdamped'), alpha, omega0
+        if alpha > omega0:
+            return 'Overdamped', alpha, omega0
+        return 'Underdamped', alpha, omega0
 
     def response(self):
-        result = self._particular(self.Vs, self.L * self.C, self.R * self.C,
-                            1, 1, 'Vc', 'V')
-        y0 = self.V0 - result.value(0)
-        dy0 = self.I0 / self.C - result.value(0, 1)
+        result = self.forced_response(self.L * self.C, self.R * self.C, 1, 'Vc', 'V')
+        # Subtract the forced response from the required initial conditions.
+        voltage_difference = self.V0 - result.value(0)
+        slope_difference = self.I0 / self.C - result.value(0, 1)
         kind, alpha, omega0 = self.damping()
         if kind == 'Critically Damped':
-            result.terms.extend([(y0, 0, -alpha), (dy0 + alpha * y0, 1, -alpha)])
+            result.terms.extend([(voltage_difference, 0, -alpha),
+                                 (slope_difference + alpha * voltage_difference, 1, -alpha)])
         else:
             delta = np.emath.sqrt(alpha * alpha - omega0 * omega0)
             s1, s2 = -alpha + delta, -alpha - delta
-            A = (dy0 - s2 * y0) / (s1 - s2)
-            result.terms.extend([(A, 0, s1), (y0 - A, 0, s2)])
+            A = (slope_difference - s2 * voltage_difference) / (s1 - s2)
+            B = voltage_difference - A
+            result.terms.append((A, 0, s1))
+            result.terms.append((B, 0, s2))
         return result
 
     def calculate_response(self):
@@ -208,12 +273,14 @@ def read_source():
     if choice == '1':
         return DCSource(read_number('Enter Vs (V): '))
     if choice == '2':
-        return SinusoidalSource(read_number('Enter amplitude (V): '),
-                                        read_number('Enter frequency (Hz): '),
-                                        read_number('Enter phase (degrees): '))
+        amplitude = read_number('Enter amplitude (V): ')
+        frequency = read_number('Enter frequency (Hz): ')
+        phase = read_number('Enter phase (degrees): ')
+        return SinusoidalSource(amplitude, frequency, phase)
     if choice == '3':
-        return ExponentialSource(read_number('Enter amplitude (V): '),
-                                         read_number('Enter rate k (1/s), negative for decay: '))
+        amplitude = read_number('Enter amplitude (V): ')
+        rate = read_number('Enter rate k (1/s), negative for decay: ')
+        return ExponentialSource(amplitude, rate)
     raise ValueError('Invalid source choice.')
 
 
@@ -232,17 +299,20 @@ def main():
             if choice == '1':
                 C = read_number('Enter C (F): ')
                 source = read_source()
-                circuit = RCCircuit(R, C, source, read_number('Enter V0 (V): '))
+                V0 = read_number('Enter V0 (V): ')
+                circuit = RCCircuit(R, C, source, V0)
             elif choice == '2':
                 L = read_number('Enter L (H): ')
                 source = read_source()
-                circuit = RLCircuit(R, L, source, read_number('Enter I0 (A): '))
+                I0 = read_number('Enter I0 (A): ')
+                circuit = RLCircuit(R, L, source, I0)
             else:
                 L = read_number('Enter L (H): ')
                 C = read_number('Enter C (F): ')
                 source = read_source()
-                circuit = SeriesRLC(R, L, C, source, read_number('Enter V0 (V): '),
-                                    read_number('Enter I0 (A): '))
+                V0 = read_number('Enter V0 (V): ')
+                I0 = read_number('Enter I0 (A): ')
+                circuit = SeriesRLC(R, L, C, source, V0, I0)
             circuit.calculate_response()
         except ValueError as error:
             print('Invalid input:', error)

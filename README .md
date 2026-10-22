@@ -160,6 +160,23 @@ Vc(t) = Re[ (10)*exp((0)*t) + (-10)*exp((-10)*t) ] V
 
 The capacitor starts at 0 V and approaches 10 V. At one time constant, its voltage is approximately 6.32 V. The program prints the equation; the value at a specific time can be evaluated separately.
 
+## Reading the Code
+
+Start with `main()` at the bottom: it reads inputs, creates a circuit object,
+and calls `calculate_response()`. Then read `RCCircuit`, the simplest circuit.
+Its `response()` method adds two parts: the source-driven response and a natural
+response that makes the starting voltage equal to `V0`.
+
+Next read `RLCircuit` (the RL circuit), then `SeriesRLC`. These use the same steps,
+but different circuit equations. `Circuit.forced_response()` contains the shared
+source-driven calculation. `Response.value()` evaluates the result and uses
+explicit product-rule formulas for its first two derivatives.
+
+Python syntax is kept explicit, with ordinary constructors, named intermediate
+values, and `if`/`else` branches. The electrical mathematics still includes complex
+numbers: `1j` means the imaginary unit, and `Re` means take the real part. These
+let the same calculation handle DC, sine waves, and exponential sources.
+
 ## Object-Oriented Design
 
 | Class | Role |
