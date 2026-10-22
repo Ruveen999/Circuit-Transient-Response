@@ -1,235 +1,103 @@
 # Circuit Transient Response Calculator
 
-A Python command-line program that calculates analytical transient-response equations for **RC, RL, and series RLC circuits** with a constant DC, sinusoidal, or exponential voltage source and specified initial conditions.
+A simple Python program for series RC, RL, and RLC circuits. It prints the
+capacitor-voltage or inductor-current equation, including initial conditions.
 
-This project combines circuit analysis with object-oriented programming. Each circuit class inherits from a common `Circuit` class and implements its own `calculate_response()` method.
+## Run
 
-## Features
-
-- Calculate the time constant and capacitor-voltage equation for an RC circuit.
-- Calculate the time constant and inductor-current equation for an RL circuit.
-- Classify a series RLC response as overdamped, critically damped, or underdamped.
-- Calculate the series RLC capacitor-voltage equation using the initial voltage and current.
-- Choose a DC, sinusoidal, or exponential voltage source for each circuit.
-- Include initial conditions and matching exponential decay rates in the analytical response.
-- Enter component values through an interactive menu and perform multiple calculations.
-
-## Requirements
-
-- Python 3.10 or newer
-- NumPy
-
-## Installation and Usage
-
-Open a terminal in the repository folder and install NumPy:
+Requires Python 3 and NumPy:
 
 ```bash
 python -m pip install numpy
-```
-
-Run the program:
-
-```bash
 python main.py
 ```
 
-Choose a circuit from the menu:
+Choose a circuit, enter component values, select a source, and enter the initial
+voltage/current. Choose `4` to exit.
 
-```text
-1. RC Circuit
-2. RL Circuit
-3. Series RLC Circuit
-4. Exit
-```
+## Sources
 
-After entering the component values, select a source:
-
-```text
-1. Constant DC: Vs(t) = Vs
-2. Sinusoidal:  Vs(t) = A sin(2π f t + φ)
-3. Exponential: Vs(t) = A exp(k t)
-```
-
-For a sinusoid, enter amplitude in volts, frequency in Hz, and phase in degrees.
-Frequency must be nonnegative. For an exponential, enter amplitude in volts and
-rate `k` in inverse seconds: negative means decay, positive means growth, and zero
-means DC. Sources apply for `t >= 0`; initial voltage/current are specified at `t = 0`.
-
-Enter values in SI units:
-
-| Input | Meaning | Unit |
+| Source | Voltage for t >= 0 | Inputs |
 | --- | --- | --- |
-| `R` | Resistance | ohm |
-| `L` | Inductance | henry |
-| `C` | Capacitance | farad |
-| `Vs` | Constant source voltage for t ≥ 0 | volt |
-| `V0` | Initial capacitor voltage | volt |
-| `I0` | Initial inductor current | ampere |
+| DC | Vs(t) = V | Voltage in volts |
+| Sinusoidal | Vs(t) = A sin(2πft + phase) | Amplitude in volts, frequency in Hz, phase in degrees |
+| Exponential | Vs(t) = A exp(kt) | Amplitude in volts, rate k in inverse seconds |
 
-For example, enter `0.0001` or `1e-4` for a 100 µF capacitor. Use positive values for resistance, inductance, and capacitance.
+Negative `k` means exponential decay; positive `k` means growth. Zero means DC.
+Use positive R, L, and C values in ohms, henries, and farads. Frequency must be
+nonnegative. Initial capacitor voltage is in volts and initial inductor current
+is in amperes.
 
-## Time-Varying Sources
+Enter finite numbers at number prompts. There is no exception handling: entering
+text instead of a number stops the program. Simple `if` conditions check menu
+choices and component signs. Very large values can overflow NumPy calculations.
 
-The program solves these equations with the entered initial conditions:
+## Code Structure
 
-```text
-RC:         RC Vc′ + Vc = Vs(t)
-RL:         L iL′ + R iL = Vs(t)
-Series RLC: LC Vc″ + RC Vc′ + Vc = Vs(t)
-```
+- `VoltageSource` stores the source type and its values using a plain constructor.
+- `Circuit` is a regular parent class with a method to print the answer.
+- `RCCircuit`, `RLCircuit`, and `SeriesRLC` inherit from `Circuit`. Each has a
+  constructor and its own `calculate_response()` method, like the original code.
+- `source_response()` is an ordinary function that calculates the source part of
+  the answer. It returns the equation, its starting value, and its starting slope.
+- `read_source()` reads source details. `main()` runs the menu.
 
-The printed result uses `Re[ ... ]`, meaning take the real part, and `j` denotes
-the imaginary unit. Each term has the form `coefficient * t^n * exp(exponent*t)`.
-Complex exponentials express sinusoidal responses compactly. The result includes
-both the forced response and the natural response needed to satisfy initial
-conditions. If an exponential source rate matches a natural root, the forced
-term includes `t` (or `t^2` for a repeated root). Root comparisons use a relative
-tolerance of `1e-12`.
+There are no abstract classes, decorators, exception handlers, or complex numbers
+in the application. NumPy provides sine, cosine, square root, and phase conversion.
 
-Example: RC with `R=1`, `C=1`, source `2 exp(-t)`, and `V0=0` gives
-`Vc(t) = 2 t exp(-t)` V. Sinusoidal responses include the startup transient,
-not just the steady-state sinusoid.
+Start reading at `main()`, then read `RCCircuit.calculate_response()`. Read the
+source function next, followed by RL and RLC. The circuit methods follow three steps:
 
-For programmatic evaluation, import the circuit classes and `VoltageSource`:
+1. Calculate the part caused by the source.
+2. Calculate constants so the complete answer has the entered initial conditions.
+3. Print the equation.
 
-```python
-from main import RCCircuit, SinusoidalSource
-
-source = SinusoidalSource(amplitude=10, frequency=50, phase_degrees=0)
-response = RCCircuit(R=1000, C=1e-4, Vs=source, V0=0).response()
-print(response.equation())
-print(response.value(0.01))  # capacitor voltage at 10 ms
-```
-
-Passing a number as `Vs` continues to mean a constant DC voltage.
-
-## Circuit Equations for DC Sources
-
-### RC Circuit
-
-The capacitor voltage approaches the source voltage with time constant τ = RC:
+## Circuit Equations
 
 ```text
-Vc(t) = Vs + (V0 − Vs)e^(−t/τ)
+RC:         RC*Vc' + Vc = Vs(t)
+RL:         L*iL' + R*iL = Vs(t)
+Series RLC: LC*Vc'' + RC*Vc' + Vc = Vs(t)
 ```
 
-### RL Circuit
+The source function uses `a*y'' + b*y' + c*y = Vs(t)` so these three circuits
+can share the same source calculation. For RC, for example, `a=0`, `b=RC`, `c=1`.
 
-The inductor current approaches Vs/R with time constant τ = L/R:
+For a sinusoidal source, the source part is `A*sin(omega*t + phase) +
+B*cos(omega*t + phase)`. For an exponential source, it is normally
+`A*exp(k*t)`. When `k` matches a natural decay rate, it needs a factor of `t`;
+a repeated match needs `t**2`. Comparisons use a relative tolerance of `1e-12`.
 
-```text
-iL(t) = Vs/R + (I0 − Vs/R)e^(−t/τ)
-```
+RC and RL have one natural decay term. Series RLC has overdamped, critically
+damped, and underdamped cases, calculated with separate `if`/`elif`/`else` branches.
+The RLC initial voltage slope is `I0/C`.
 
-### Series RLC Circuit
-
-The damping factor and undamped natural angular frequency are:
-
-```text
-α = R/(2L)
-ω₀ = 1/√(LC)
-```
-
-The capacitor-voltage response depends on their relationship:
-
-| Condition | Response | Capacitor voltage |
-| --- | --- | --- |
-| α > ω₀ | Overdamped | Vs + A·e^(s₁t) + B·e^(s₂t) |
-| α = ω₀ | Critically damped | Vs + (A + Bt)e^(−αt) |
-| α < ω₀ | Underdamped | Vs + e^(−αt)[A·cos(ωdt) + B·sin(ωdt)] |
-
-Here, s₁ and s₂ = −α ± √(α² − ω₀²), and ωd = √(ω₀² − α²). The program calculates A and B from Vc(0) = V0 and dVc/dt at t = 0 equal to I0/C.
+The printed equations use `exp(x)` for e to the power x and `**2` for squaring.
+All equations use real numbers. Components are ideal and the output applies for
+`t >= 0`. Near-matching roots can be numerically sensitive. Plotting and CSV
+export are not included.
 
 ## Example: RC Charging
 
-Choose circuit option `1`, enter R and C, then choose source option `1` (DC) and enter Vs and V0:
+Choose circuit `1` and enter `R=1000`, `C=0.0001`. Choose DC source `1`, enter
+`Vs=10`, and set `V0=0`.
+
+The program prints a time constant of `0.1 s` and an equation equivalent to:
 
 ```text
-R  = 1000 ohm
-C  = 0.0001 F
-Vs = 10 V
-V0 = 0 V
+Vc(t) = 10 - 10*exp(-t/0.1) V
 ```
 
-The calculated result is:
-
-```text
-Time Constant = 0.1 s
-Vc(t) = Re[ (10)*exp((0)*t) + (-10)*exp((-10)*t) ] V
-```
-
-The capacitor starts at 0 V and approaches 10 V. At one time constant, its voltage is approximately 6.32 V. The program prints the equation; the value at a specific time can be evaluated separately.
-
-## Reading the Code
-
-Start with `main()` at the bottom: it reads inputs, creates a circuit object,
-and calls `calculate_response()`. Then read `RCCircuit`, the simplest circuit.
-Its `response()` method adds two parts: the source-driven response and a natural
-response that makes the starting voltage equal to `V0`.
-
-Next read `RLCircuit` (the RL circuit), then `SeriesRLC`. These use the same steps,
-but different circuit equations. `forced_response()` contains the shared
-source-driven calculation. `Response.value()` evaluates the result and uses
-explicit product-rule formulas for its first two derivatives.
-
-Python syntax is kept explicit, with ordinary constructors, named intermediate
-values, and `if`/`else` branches. The electrical mathematics still includes complex
-numbers: `1j` means the imaginary unit, and `Re` means take the real part. These
-let the same calculation handle DC, sine waves, and exponential sources.
-
-## Object-Oriented Design
-
-| Class | Role |
-| --- | --- |
-| `Circuit` | Regular parent class with the shared output method |
-| `RCCircuit` | RC capacitor-voltage response |
-| `RLCircuit` | RL inductor-current response |
-| `SeriesRLC` | Series RLC capacitor-voltage response and damping classification |
-
-Each circuit class has its own ordinary `response()` method. The shared
-`calculate_response()` method prints the result; subclasses extend it with time
-constants or damping information using `super()`.
-
-`VoltageSource` is the parent of `DCSource`, `SinusoidalSource`, and
-`ExponentialSource`. Circuits accept any of these source objects, so the menu
-can select a source without changing the circuit equations. `Response` is a
-regular class with an explicit constructor, methods for evaluation, and equation
-formatting.
-
-NumPy supplies exponentials, complex square roots, phase conversion, approximate
-comparisons, and array evaluation. For example, `response.value(np.linspace(0, 1, 100))`
-returns 100 response values (after `import numpy as np`).
-
-The code uses regular functions, constructors, inheritance, loops, and `if`/`else`.
-There are no abstract classes, decorators, or exception-handling blocks. The menu
-checks positive component values and valid choices with ordinary conditions.
-Enter numeric values at number prompts; text such as `hello` will stop the program.
-Choose option `4` to exit.
-
-## Assumptions and Current Limitations
-
-- Components are ideal. Sources use the selected DC, sinusoidal, or exponential form for t ≥ 0.
-- The RC and RL models use a series resistor with the energy-storage element; the RLC model is a series circuit.
-- Initial conditions are specified at t = 0. Series RLC current is positive in the direction that charges the capacitor's positive terminal.
-- The program prints analytical equations; it does not yet plot responses or generate time-series data.
-- Enter finite numeric values; R, L, and C must be positive and frequency nonnegative. The menu checks component signs and source choices, but does not handle nonnumeric input. Programmatic callers must supply valid values too.
-- Critical damping and source/root matching use a relative tolerance of `1e-12`; extremely close roots can be numerically sensitive.
-- Very large exponential growth rates or evaluation times can overflow and produce NumPy warnings or nonfinite results.
-
-## Planned Improvements
-
-- Plot voltage and current against time.
-- Calculate response values at user-selected times.
-- Export calculated response data to CSV.
+For an exponential example, use `R=1`, `C=1`, amplitude `2`, rate `-1`, and
+`V0=0`. The result is `Vc(t) = 2*t*exp(-t)` V.
 
 ## Tests
-
-Run from the repository root:
 
 ```bash
 python -m unittest discover -s tests -v
 ```
 
-Tests check DC regressions, initial conditions, the governing differential equations,
-matching exponential rates (including repeated roots), NumPy array evaluation, and all
-nine circuit/source combinations through the CLI.
+The five tests check DC examples, initial conditions, the circuit differential
+equations, matching exponential rates, menu conditions, and all nine circuit/source
+combinations. The test file uses extra testing tools; these are separate from the
+basic application code in `main.py`.
