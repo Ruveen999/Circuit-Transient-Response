@@ -6,21 +6,11 @@ import unittest
 
 import numpy as np
 
-from main import (Circuit, DCSource, SinusoidalSource, ExponentialSource,
+from main import (DCSource, SinusoidalSource, ExponentialSource,
                   RCCircuit, RLCircuit, SeriesRLC, VoltageSource)
 
 
 class ResponseTests(unittest.TestCase):
-    def test_abstract_circuit(self):
-        with self.assertRaises(TypeError):
-            Circuit()
-
-        class IncompleteCircuit(Circuit):
-            pass
-
-        with self.assertRaises(TypeError):
-            IncompleteCircuit()
-
     def test_numpy_arrays_and_source_classes(self):
         times = np.linspace(0, 1, 11)
         sources = [DCSource(4), SinusoidalSource(4, 2, 30), ExponentialSource(4, -2)]
@@ -33,27 +23,11 @@ class ResponseTests(unittest.TestCase):
             np.testing.assert_allclose(response.value(times, 1) + response.value(times), values,
                                        atol=1e-12)
 
-    def test_exceptions_and_cli_recovery(self):
-        for source in (lambda: DCSource(float('nan')),
-                       lambda: ExponentialSource(1, float('inf'))):
-            with self.assertRaises(ValueError):
-                source()
-        response = RCCircuit(1, 1, 1, 0).response()
-        for t in (-1, float('nan')):
-            with self.assertRaises(ValueError):
-                response.value(t)
-        with self.assertRaises(FloatingPointError):
-            ExponentialSource(1, 1000).value(1)
-        p = subprocess.run([sys.executable, 'main.py'], input='1\noops\n4\n',
-                           text=True, capture_output=True, timeout=10, check=True)
-        self.assertIn('Invalid input:', p.stdout)
-        self.assertIn('Exiting program.', p.stdout)
-
     def test_initial_conditions_and_differential_equations(self):
-        sources = [VoltageSource(10), VoltageSource.sinusoidal(4, 0.7, 35),
-                   VoltageSource.exponential(3, -0.8),
-                   VoltageSource.exponential(2, 0.4),
-                   VoltageSource.sinusoidal(4, 0, 90)]
+        sources = [VoltageSource(10), SinusoidalSource(4, 0.7, 35),
+                   ExponentialSource(3, -0.8),
+                   ExponentialSource(2, 0.4),
+                   SinusoidalSource(4, 0, 90)]
         count = 0
         for source in sources:
             circuits = [RCCircuit(3, 0.4, source, 2), RLCircuit(3, 0.4, source, 2)]
@@ -79,9 +53,9 @@ class ResponseTests(unittest.TestCase):
 
     def test_matching_exponential_rates(self):
         # First-order, distinct second-order roots, and a repeated second-order root.
-        for circuit in [RCCircuit(1, 1, VoltageSource.exponential(2, -1), 0),
-                        RLCircuit(1, 1, VoltageSource.exponential(2, -1), 0),
-                        SeriesRLC(3, 1, 0.5, VoltageSource.exponential(2, -1), 0, 0)]:
+        for circuit in [RCCircuit(1, 1, ExponentialSource(2, -1), 0),
+                        RLCircuit(1, 1, ExponentialSource(2, -1), 0),
+                        SeriesRLC(3, 1, 0.5, ExponentialSource(2, -1), 0, 0)]:
             response = circuit.response()
             self.assertEqual(response.terms[0][1], 1)
             self.assertTrue(math.isfinite(response.value(1)))
@@ -93,9 +67,9 @@ class ResponseTests(unittest.TestCase):
                     lhs = dy + y
                 self.assertAlmostEqual(lhs, 2 * math.exp(-t))
         for cls in (RCCircuit, RLCircuit):
-            response = cls(1, 1, VoltageSource.exponential(2, -1), 0).response()
+            response = cls(1, 1, ExponentialSource(2, -1), 0).response()
             self.assertAlmostEqual(response.value(1), 2 / math.e)
-        response = SeriesRLC(2, 1, 1, VoltageSource.exponential(2, -1), 0, 0).response()
+        response = SeriesRLC(2, 1, 1, ExponentialSource(2, -1), 0, 0).response()
         self.assertEqual(response.terms[0][1], 2)
         self.assertAlmostEqual(response.value(1), 1 / math.e)
         self.assertAlmostEqual(response.value(0), 0)
@@ -107,12 +81,14 @@ class ResponseTests(unittest.TestCase):
         self.assertAlmostEqual(RCCircuit(1000, 0.0001, 10, 0).response().value(0.1), 10 * (1 - math.exp(-1)))
         self.assertAlmostEqual(RLCircuit(10, 2, 20, 0).response().value(0.2), 2 * (1 - math.exp(-1)))
 
-    def test_invalid_components(self):
-        for bad in (0, -1, float('inf'), float('nan')):
-            with self.assertRaises(ValueError):
-                RCCircuit(bad, 1, 10, 0)
-        with self.assertRaises(ValueError):
-            VoltageSource.sinusoidal(1, -1)
+    def test_menu_conditions(self):
+        for data, message in [('9\n4\n', 'Invalid choice.'),
+                              ('1\n0\n4\n', 'R must be positive.'),
+                              ('1\n1\n1\n9\n4\n', 'Invalid source choice.')]:
+            result = subprocess.run([sys.executable, 'main.py'], input=data,
+                                    text=True, capture_output=True, timeout=10, check=True)
+            self.assertIn(message, result.stdout)
+            self.assertIn('Exiting program.', result.stdout)
 
     def test_cli_all_sources_and_circuits(self):
         for circuit, components, initial in [('1', ['1', '1'], ['0']),

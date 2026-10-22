@@ -93,9 +93,9 @@ not just the steady-state sinusoid.
 For programmatic evaluation, import the circuit classes and `VoltageSource`:
 
 ```python
-from main import RCCircuit, VoltageSource
+from main import RCCircuit, SinusoidalSource
 
-source = VoltageSource.sinusoidal(amplitude=10, frequency=50, phase_degrees=0)
+source = SinusoidalSource(amplitude=10, frequency=50, phase_degrees=0)
 response = RCCircuit(R=1000, C=1e-4, Vs=source, V0=0).response()
 print(response.equation())
 print(response.value(0.01))  # capacitor voltage at 10 ms
@@ -168,7 +168,7 @@ Its `response()` method adds two parts: the source-driven response and a natural
 response that makes the starting voltage equal to `V0`.
 
 Next read `RLCircuit` (the RL circuit), then `SeriesRLC`. These use the same steps,
-but different circuit equations. `Circuit.forced_response()` contains the shared
+but different circuit equations. `forced_response()` contains the shared
 source-driven calculation. `Response.value()` evaluates the result and uses
 explicit product-rule formulas for its first two derivatives.
 
@@ -181,12 +181,12 @@ let the same calculation handle DC, sine waves, and exponential sources.
 
 | Class | Role |
 | --- | --- |
-| `Circuit` | Abstract base class (`ABC`); requires subclasses to implement `response()` |
+| `Circuit` | Regular parent class with the shared output method |
 | `RCCircuit` | RC capacitor-voltage response |
 | `RLCircuit` | RL inductor-current response |
 | `SeriesRLC` | Series RLC capacitor-voltage response and damping classification |
 
-The circuit subclasses implement the abstract `response()` method. The shared
+Each circuit class has its own ordinary `response()` method. The shared
 `calculate_response()` method prints the result; subclasses extend it with time
 constants or damping information using `super()`.
 
@@ -200,9 +200,11 @@ NumPy supplies exponentials, complex square roots, phase conversion, approximate
 comparisons, and array evaluation. For example, `response.value(np.linspace(0, 1, 100))`
 returns 100 response values (after `import numpy as np`).
 
-Invalid inputs raise `ValueError`. The menu catches these exceptions and lets the
-user retry. Numerical range errors are handled separately; NumPy overflow during
-response evaluation raises `FloatingPointError`. EOF or Ctrl+C exits cleanly.
+The code uses regular functions, constructors, inheritance, loops, and `if`/`else`.
+There are no abstract classes, decorators, or exception-handling blocks. The menu
+checks positive component values and valid choices with ordinary conditions.
+Enter numeric values at number prompts; text such as `hello` will stop the program.
+Choose option `4` to exit.
 
 ## Assumptions and Current Limitations
 
@@ -210,9 +212,9 @@ response evaluation raises `FloatingPointError`. EOF or Ctrl+C exits cleanly.
 - The RC and RL models use a series resistor with the energy-storage element; the RLC model is a series circuit.
 - Initial conditions are specified at t = 0. Series RLC current is positive in the direction that charges the capacitor's positive terminal.
 - The program prints analytical equations; it does not yet plot responses or generate time-series data.
-- CLI inputs must be finite numbers; R, L, and C must be positive. Invalid input returns to the circuit menu.
+- Enter finite numeric values; R, L, and C must be positive and frequency nonnegative. The menu checks component signs and source choices, but does not handle nonnumeric input. Programmatic callers must supply valid values too.
 - Critical damping and source/root matching use a relative tolerance of `1e-12`; extremely close roots can be numerically sensitive.
-- Very large exponential growth rates or evaluation times can exceed floating-point range; evaluation raises a numerical exception.
+- Very large exponential growth rates or evaluation times can overflow and produce NumPy warnings or nonfinite results.
 
 ## Planned Improvements
 
@@ -229,5 +231,5 @@ python -m unittest discover -s tests -v
 ```
 
 Tests check DC regressions, initial conditions, the governing differential equations,
-matching exponential rates (including repeated roots), invalid components, and all
+matching exponential rates (including repeated roots), NumPy array evaluation, and all
 nine circuit/source combinations through the CLI.
