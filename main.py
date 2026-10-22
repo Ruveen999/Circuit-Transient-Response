@@ -1,11 +1,11 @@
-"""Analytical responses of series RC, RL and RLC circuits for t >= 0."""
+
 from abc import ABC, abstractmethod
 import math
 import numpy as np
 
 
 class VoltageSource:
-    """Represent a voltage as Re[coefficient * exp(exponent * t)]."""
+   
 
     def __init__(self, coefficient, exponent=0):
         if not np.isfinite(coefficient) or not np.isfinite(exponent):
@@ -52,7 +52,7 @@ class ExponentialSource(VoltageSource):
 
 
 class Response:
-    """Store analytical terms and evaluate them at one time or a NumPy array."""
+   
 
     def __init__(self, terms, label, unit):
         # Each term is (coefficient, power of t, exponential rate).
@@ -89,7 +89,7 @@ class Response:
 
 
 class Circuit(ABC):
-    """Shared validation and output; subclasses provide the circuit response."""
+    
 
     @abstractmethod
     def response(self):
