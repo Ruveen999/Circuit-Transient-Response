@@ -1,6 +1,6 @@
 # Circuit Transient Response Calculator
 
-A Python command-line program that calculates analytical transient-response equations for **RC, RL, and series RLC circuits** with a constant DC source and specified initial conditions.
+A Python command-line program that calculates analytical transient-response equations for **RC, RL, and series RLC circuits** with a constant DC, sinusoidal, or exponential voltage source and specified initial conditions.
 
 This project combines circuit analysis with object-oriented programming. Each circuit class inherits from a common `Circuit` class and implements its own `calculate_response()` method.
 
@@ -10,16 +10,18 @@ This project combines circuit analysis with object-oriented programming. Each ci
 - Calculate the time constant and inductor-current equation for an RL circuit.
 - Classify a series RLC response as overdamped, critically damped, or underdamped.
 - Calculate the series RLC capacitor-voltage equation using the initial voltage and current.
+- Choose a DC, sinusoidal, or exponential voltage source for each circuit.
+- Include initial conditions and matching exponential decay rates in the analytical response.
 - Enter component values through an interactive menu and perform multiple calculations.
 
 ## Requirements
 
-- Python 3
+- Python 3.10 or newer
 - NumPy
 
 ## Installation and Usage
 
-Download the repository and open a terminal in its folder. Save the program as `main.py`, then install NumPy:
+Open a terminal in the repository folder and install NumPy:
 
 ```bash
 python -m pip install numpy
@@ -40,6 +42,19 @@ Choose a circuit from the menu:
 4. Exit
 ```
 
+After entering the component values, select a source:
+
+```text
+1. Constant DC: Vs(t) = Vs
+2. Sinusoidal:  Vs(t) = A sin(2π f t + φ)
+3. Exponential: Vs(t) = A exp(k t)
+```
+
+For a sinusoid, enter amplitude in volts, frequency in Hz, and phase in degrees.
+Frequency must be nonnegative. For an exponential, enter amplitude in volts and
+rate `k` in inverse seconds: negative means decay, positive means growth, and zero
+means DC. Sources apply for `t >= 0`; initial voltage/current are specified at `t = 0`.
+
 Enter values in SI units:
 
 | Input | Meaning | Unit |
@@ -53,7 +68,42 @@ Enter values in SI units:
 
 For example, enter `0.0001` or `1e-4` for a 100 µF capacitor. Use positive values for resistance, inductance, and capacitance.
 
-## Circuit Equations
+## Time-Varying Sources
+
+The program solves these equations with the entered initial conditions:
+
+```text
+RC:         RC Vc′ + Vc = Vs(t)
+RL:         L iL′ + R iL = Vs(t)
+Series RLC: LC Vc″ + RC Vc′ + Vc = Vs(t)
+```
+
+The printed result uses `Re[ ... ]`, meaning take the real part, and `j` denotes
+the imaginary unit. Each term has the form `coefficient * t^n * exp(exponent*t)`.
+Complex exponentials express sinusoidal responses compactly. The result includes
+both the forced response and the natural response needed to satisfy initial
+conditions. If an exponential source rate matches a natural root, the forced
+term includes `t` (or `t^2` for a repeated root). Root comparisons use a relative
+tolerance of `1e-12`.
+
+Example: RC with `R=1`, `C=1`, source `2 exp(-t)`, and `V0=0` gives
+`Vc(t) = 2 t exp(-t)` V. Sinusoidal responses include the startup transient,
+not just the steady-state sinusoid.
+
+For programmatic evaluation, import the circuit classes and `VoltageSource`:
+
+```python
+from main import RCCircuit, VoltageSource
+
+source = VoltageSource.sinusoidal(amplitude=10, frequency=50, phase_degrees=0)
+response = RCCircuit(R=1000, C=1e-4, Vs=source, V0=0).response()
+print(response.equation())
+print(response.value(0.01))  # capacitor voltage at 10 ms
+```
+
+Passing a number as `Vs` continues to mean a constant DC voltage.
+
+## Circuit Equations for DC Sources
 
 ### RC Circuit
 
@@ -92,7 +142,7 @@ Here, s₁ and s₂ = −α ± √(α² − ω₀²), and ωd = √(ω₀² − 
 
 ## Example: RC Charging
 
-Choose option `1` and enter:
+Choose circuit option `1`, enter R and C, then choose source option `1` (DC) and enter Vs and V0:
 
 ```text
 R  = 1000 ohm
@@ -105,7 +155,7 @@ The calculated result is:
 
 ```text
 Time Constant = 0.1 s
-Vc(t) = 10 − 10e^(−t/0.1) V
+Vc(t) = Re[ (10)*exp((0)*t) + (-10)*exp((-10)*t) ] V
 ```
 
 The capacitor starts at 0 V and approaches 10 V. At one time constant, its voltage is approximately 6.32 V. The program prints the equation; the value at a specific time can be evaluated separately.
@@ -114,26 +164,53 @@ The capacitor starts at 0 V and approaches 10 V. At one time constant, its volta
 
 | Class | Role |
 | --- | --- |
-| `Circuit` | Common parent class with a placeholder response method |
+| `Circuit` | Abstract base class (`ABC`); requires subclasses to implement `response()` |
 | `RCCircuit` | RC capacitor-voltage response |
 | `RLCircuit` | RL inductor-current response |
 | `SeriesRLC` | Series RLC capacitor-voltage response and damping classification |
 
-The subclasses override the same method, demonstrating inheritance and method overriding.
+The circuit subclasses implement the abstract `response()` method. The shared
+`calculate_response()` method prints the result; subclasses extend it with time
+constants or damping information using `super()`.
+
+`VoltageSource` is the parent of `DCSource`, `SinusoidalSource`, and
+`ExponentialSource`. Circuits accept any of these source objects, so the menu
+can select a source without changing the circuit equations. `Response` is a
+regular class with an explicit constructor, methods for evaluation, and equation
+formatting.
+
+NumPy supplies exponentials, complex square roots, phase conversion, approximate
+comparisons, and array evaluation. For example, `response.value(np.linspace(0, 1, 100))`
+returns 100 response values (after `import numpy as np`).
+
+Invalid inputs raise `ValueError`. The menu catches these exceptions and lets the
+user retry. Numerical range errors are handled separately; NumPy overflow during
+response evaluation raises `FloatingPointError`. EOF or Ctrl+C exits cleanly.
 
 ## Assumptions and Current Limitations
 
-- Components are ideal, and the source voltage remains constant for t ≥ 0.
+- Components are ideal. Sources use the selected DC, sinusoidal, or exponential form for t ≥ 0.
 - The RC and RL models use a series resistor with the energy-storage element; the RLC model is a series circuit.
 - Initial conditions are specified at t = 0. Series RLC current is positive in the direction that charges the capacitor's positive terminal.
 - The program prints analytical equations; it does not yet plot responses or generate time-series data.
-- Inputs are not currently validated. Non-numeric entries or zero component values can cause errors.
-- Critical damping currently uses exact floating-point equality. A tolerance-based comparison would improve classification near the critical condition.
+- CLI inputs must be finite numbers; R, L, and C must be positive. Invalid input returns to the circuit menu.
+- Critical damping and source/root matching use a relative tolerance of `1e-12`; extremely close roots can be numerically sensitive.
+- Very large exponential growth rates or evaluation times can exceed floating-point range; evaluation raises a numerical exception.
 
 ## Planned Improvements
 
-- Validate component values and handle invalid input.
-- Use a tolerance-based critical-damping comparison.
 - Plot voltage and current against time.
 - Calculate response values at user-selected times.
 - Export calculated response data to CSV.
+
+## Tests
+
+Run from the repository root:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+Tests check DC regressions, initial conditions, the governing differential equations,
+matching exponential rates (including repeated roots), invalid components, and all
+nine circuit/source combinations through the CLI.
